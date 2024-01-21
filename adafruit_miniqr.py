@@ -147,12 +147,12 @@ class QRCode:
         for r in range(8, self.module_count - 8):
             if self.matrix[r, 6] is not None:
                 continue
-            self.matrix[r, 6] = r % 2 == 0
+            self.matrix[r, 6] = (r & 1) == 0
 
         for c in range(8, self.module_count - 8):  # pylint: disable=invalid-name
             if self.matrix[6, c] is not None:
                 continue
-            self.matrix[6, c] = c % 2 == 0
+            self.matrix[6, c] = (c & 1) == 0
 
     def _setup_position_adjust_pattern(self):
         """Add the position adjust data pixels to the matrix"""
@@ -532,16 +532,56 @@ def _get_rs_blocks(qr_type, ecc):
     return blocks
 
 
+class QRBitBuffer:
+    """Storage class for a length of individual bits"""
+
+    def __init__(self, length=0):
+        self.buffer = bytearray((length + 7) // 8)
+        self.length = length
+
+    def __repr__(self):
+        return ".".join([str(n) for n in self.buffer])
+
+    def get_length_bits(self):
+        """Size of bit buffer"""
+        return self.length
+
+    def addr(self, index):  # pylint: disable=no-self-use
+        """Address of index as (i, mask)"""
+        return (index >> 3, (0x80 >> (index & 7)))
+
+    def __getitem__(self, index):
+        (i, mask) = self.addr(index)
+        return (self.buffer[i] & mask) != 0
+
+    def __setitem__(self, index, value):
+        (i, mask) = self.addr(index)
+        self.buffer[i] &= ~mask
+        self.buffer[i] |= mask * value
+
+    def put(self, num, length):
+        """Add a number of bits from a single integer value"""
+        for i in range(length):
+            self.put_bit(num & (1 << (length - i - 1)))
+
+    def put_bit(self, bit):
+        """Insert one bit at the end of the bit buffer"""
+        (i, mask) = self.addr(self.length)
+        if len(self.buffer) <= i:
+            self.buffer.append(0)
+        if bit:
+            self.buffer[i] |= mask
+        self.length += 1
+
+
 class QRBitMatrix:
     """A bit-packed storage class for matrices"""
 
     def __init__(self, width, height):
         self.width = width
         self.height = height
-        if width > 60:
-            raise ValueError("Max 60 bits wide:", width)
-        self.buffer = [0] * self.height * 2
-        self.used = [0] * self.height * 2
+        self.buffer = QRBitBuffer(self.width * self.height)
+        self.used = QRBitBuffer(self.width * self.height)
 
     def __repr__(self):
         b = ""
@@ -554,58 +594,20 @@ class QRBitMatrix:
             b += "\n"
         return b
 
-    def __getitem__(self, key):
+    def addr(self, key):
+        """Address of key as QRBitBuffer index"""
         x, y = key
         if y > self.width:
             raise ValueError()
-        i = 2 * x + (y // 30)
-        j = y % 30
-        if not self.used[i] & (1 << j):
+        return x + (self.width * y)
+
+    def __getitem__(self, key):
+        i = self.addr(key)
+        if not self.used[i]:
             return None
-        return self.buffer[i] & (1 << j)
+        return self.buffer[i]
 
     def __setitem__(self, key, value):
-        x, y = key
-        if y > self.width:
-            raise ValueError()
-        i = 2 * x + (y // 30)
-        j = y % 30
-        if value:
-            self.buffer[i] |= 1 << j
-        else:
-            self.buffer[i] &= ~(1 << j)
-        self.used[i] |= 1 << j  # buffer item was set
-
-
-class QRBitBuffer:
-    """Storage class for a length of individual bits"""
-
-    def __init__(self):
-        self.buffer = []
-        self.length = 0
-
-    def __repr__(self):
-        return ".".join([str(n) for n in self.buffer])
-
-    def get(self, index):
-        """The bit value at a location"""
-        i = index // 8
-        return self.buffer[i] & (1 << (7 - index % 8))
-
-    def put(self, num, length):
-        """Add a number of bits from a single integer value"""
-        for i in range(length):
-            self.put_bit(num & (1 << (length - i - 1)))
-
-    def get_length_bits(self):
-        """Size of bit buffer"""
-        return self.length
-
-    def put_bit(self, bit):
-        """Insert one bit at the end of the bit buffer"""
-        i = self.length // 8
-        if len(self.buffer) <= i:
-            self.buffer.append(0)
-        if bit:
-            self.buffer[i] |= 0x80 >> (self.length % 8)
-        self.length += 1
+        i = self.addr(key)
+        self.used[i] = 1
+        self.buffer[i] = value

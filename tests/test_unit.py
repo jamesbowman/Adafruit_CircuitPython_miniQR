@@ -53,7 +53,7 @@ class TestMiniQR(unittest.TestCase):
         _qr.add_data("test_qr_pattern_mask/1Z")
         for _m in range(8):
             _qr.make(mask_pattern=_m)
-            matrices.add(tuple(_qr.matrix.buffer))
+            matrices.add(tuple(_qr.matrix.buffer.buffer))
         self.assertEqual(len(matrices), 8)  # All 8 are unique
 
     def test_qr_auto(self):
@@ -71,7 +71,7 @@ class TestMiniQR(unittest.TestCase):
         for _s in ("", "abc", "https://www.adafruit.com", "AbCd12"):
             _a = enc(_s.encode())
             _b = enc(_s)
-            self.assertEqual(_a.buffer, _b.buffer)
+            self.assertEqual(_a.buffer.buffer, _b.buffer.buffer)
 
     def test_qr_all(self):
         for _ty in range(1, 10):
