@@ -76,10 +76,10 @@ class TestMiniQR(unittest.TestCase):
     def test_qr_all(self):
         for _ty in range(1, 10):
             for _ec in (
-                adafruit_miniqr.L,
                 adafruit_miniqr.M,
-                adafruit_miniqr.Q,
+                adafruit_miniqr.L,
                 adafruit_miniqr.H,
+                adafruit_miniqr.Q,
             ):
                 _qr = adafruit_miniqr.QRCode(qr_type=_ty, error_correct=_ec)
                 _qr.add_data("abc")
@@ -87,6 +87,9 @@ class TestMiniQR(unittest.TestCase):
                     _qr.matrix = None
                     _qr.make(mask_pattern=_m)
                     self.assertTrue(_qr.matrix is not None)
+                    gildfile = f"tests/test_qr_all_{_ty}{_ec}{_m}.gild"
+                    with open(gildfile) as _f:
+                        self.assertEqual(_f.read(), repr(_qr.matrix))
 
     def test_qr_maximum(self):
         msg = bytes([random.randrange(32, 127) for i in range(230)])
