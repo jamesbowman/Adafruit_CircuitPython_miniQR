@@ -3,9 +3,12 @@
 # SPDX-License-Identifier: MIT
 
 import unittest
-import random
+import pytest
 
 import adafruit_miniqr
+
+
+REGILD = 0
 
 
 def enc(msg, **args):
@@ -73,6 +76,60 @@ class TestMiniQR(unittest.TestCase):
             _b = enc(_s)
             self.assertEqual(_a.buffer.buffer, _b.buffer.buffer)
 
+    # See https://www.thonky.com/qr-code-tutorial/character-capacities
+    capacities = {
+        (1, adafruit_miniqr.L): 17,
+        (1, adafruit_miniqr.M): 14,
+        (1, adafruit_miniqr.Q): 11,
+        (1, adafruit_miniqr.H): 7,
+        (2, adafruit_miniqr.L): 32,
+        (2, adafruit_miniqr.M): 26,
+        (2, adafruit_miniqr.Q): 20,
+        (2, adafruit_miniqr.H): 14,
+        (3, adafruit_miniqr.L): 53,
+        (3, adafruit_miniqr.M): 42,
+        (3, adafruit_miniqr.Q): 32,
+        (3, adafruit_miniqr.H): 24,
+        (4, adafruit_miniqr.L): 78,
+        (4, adafruit_miniqr.M): 62,
+        (4, adafruit_miniqr.Q): 46,
+        (4, adafruit_miniqr.H): 34,
+        (5, adafruit_miniqr.L): 106,
+        (5, adafruit_miniqr.M): 84,
+        (5, adafruit_miniqr.Q): 60,
+        (5, adafruit_miniqr.H): 44,
+        (6, adafruit_miniqr.L): 134,
+        (6, adafruit_miniqr.M): 106,
+        (6, adafruit_miniqr.Q): 74,
+        (6, adafruit_miniqr.H): 58,
+        (7, adafruit_miniqr.L): 154,
+        (7, adafruit_miniqr.M): 122,
+        (7, adafruit_miniqr.Q): 86,
+        (7, adafruit_miniqr.H): 64,
+        (8, adafruit_miniqr.L): 192,
+        (8, adafruit_miniqr.M): 152,
+        (8, adafruit_miniqr.Q): 108,
+        (8, adafruit_miniqr.H): 84,
+        (9, adafruit_miniqr.L): 230,
+        (9, adafruit_miniqr.M): 180,
+        (9, adafruit_miniqr.Q): 130,
+        (9, adafruit_miniqr.H): 98,
+    }
+
+    longstring = "IiLBXI9F2RHMQx9Z2N6XxTwd1dsUNGtjsajTsobRrBBDSq00oHXvrH0GyDFWx3zzpNKqv2iSF42n6FAw3VbiQq3AEK3O1kxQnPzsg8cltM9ch7cpRjIp0UP3r0AWCZ4K28YrvCV4oFZmhFbvyVxi37pQyff0qy9tUMUE4Et4UHD8AR56TTMJM4LchSuhejae7J2l9UrOua26i0rruUjm0uk4rVEPspoa0HATkfx"  # pylint: disable=line-too-long
+
+    def test_capacities(self):
+        for (_ty, _ec), n in self.capacities.items():
+            # Should succeed for n, RuntimeError for n+1
+            _qr = adafruit_miniqr.QRCode(qr_type=_ty, error_correct=_ec)
+            _qr.add_data(self.longstring[:n])
+            _qr.make()
+
+            _qr = adafruit_miniqr.QRCode(qr_type=_ty, error_correct=_ec)
+            _qr.add_data(self.longstring[: n + 1])
+            with pytest.raises(RuntimeError):
+                _qr.make()
+
     def test_qr_all(self):
         for _ty in range(1, 10):
             for _ec in (
@@ -82,17 +139,21 @@ class TestMiniQR(unittest.TestCase):
                 adafruit_miniqr.Q,
             ):
                 _qr = adafruit_miniqr.QRCode(qr_type=_ty, error_correct=_ec)
-                _qr.add_data("abc")
+                _qr.add_data(self.longstring[: self.capacities[(_ty, _ec)]])
                 for _m in range(8):
                     _qr.matrix = None
                     _qr.make(mask_pattern=_m)
                     self.assertTrue(_qr.matrix is not None)
                     gildfile = f"tests/test_qr_all_{_ty}{_ec}{_m}.gild"
-                    with open(gildfile) as _f:
-                        self.assertEqual(_f.read(), repr(_qr.matrix))
+                    if REGILD:
+                        with open(gildfile, "w") as _f:
+                            _f.write(repr(_qr.matrix))
+                    else:
+                        with open(gildfile) as _f:
+                            self.assertEqual(_f.read(), repr(_qr.matrix))
 
     def test_qr_maximum(self):
-        msg = bytes([random.randrange(32, 127) for i in range(230)])
+        msg = self.longstring[:230]
         _a = enc(msg)
         self.assertTrue(_a is not None)
 
