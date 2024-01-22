@@ -34,7 +34,6 @@ Implementation Notes
 """
 
 # imports
-import math
 
 __version__ = "0.0.0+auto.0"
 __repo__ = "https://github.com/adafruit/Adafruit_CircuitPython_miniQR.git"
@@ -144,15 +143,9 @@ class QRCode:
 
     def _setup_timing_pattern(self):
         """Add the timing data pixels to the matrix"""
-        for r in range(8, self.module_count - 8):
-            if self.matrix[r, 6] is not None:
-                continue
-            self.matrix[r, 6] = (r & 1) == 0
-
-        for c in range(8, self.module_count - 8):  # pylint: disable=invalid-name
-            if self.matrix[6, c] is not None:
-                continue
-            self.matrix[6, c] = (c & 1) == 0
+        for i in range(8, self.module_count - 8):
+            self.matrix[i, 6] = (i & 1) == 0
+            self.matrix[6, i] = (i & 1) == 0
 
     def _setup_position_adjust_pattern(self):
         """Add the position adjust data pixels to the matrix"""
@@ -185,9 +178,9 @@ class QRCode:
         data = (self.ECC << 3) | mask_pattern
         bits = QRUtil.get_BCH_type_info(data)
 
-        # // vertical
         for i in range(15):
             mod = not test and ((bits >> i) & 1) == 1
+            # vertical
             if i < 6:
                 self.matrix[i, 8] = mod
             elif i < 8:
@@ -195,9 +188,7 @@ class QRCode:
             else:
                 self.matrix[self.module_count - 15 + i, 8] = mod
 
-        # // horizontal
-        for i in range(15):
-            mod = not test and ((bits >> i) & 1) == 1
+            # horizontal
             if i < 8:
                 self.matrix[8, self.module_count - i - 1] = mod
             elif i < 9:
@@ -205,7 +196,7 @@ class QRCode:
             else:
                 self.matrix[8, 15 - i - 1] = mod
 
-        # // fixed module
+        # fixed module
         self.matrix[self.module_count - 8, 8] = not test
 
     def _map_data(self, data, mask_pattern):
@@ -254,7 +245,7 @@ class QRCode:
             for byte in data:
                 buffer.put(byte, 8)
 
-        # // calc num max data.
+        # calc num max data.
         total_data_count = 0
         for block in rs_blocks:
             total_data_count += block["data"]
@@ -265,15 +256,13 @@ class QRCode:
                 % (buffer.get_length_bits(), total_data_count * 8)
             )
 
-        # // end code
+        # end code
         if buffer.get_length_bits() + 4 <= total_data_count * 8:
             buffer.put(0, 4)
 
-        # // padding
-        while buffer.get_length_bits() % 8 != 0:
-            buffer.put_bit(False)
+        assert (buffer.get_length_bits() & 7) == 0
 
-        # // padding
+        # padding
         while True:
             if buffer.get_length_bits() >= total_data_count * 8:
                 break
@@ -292,8 +281,8 @@ class QRCode:
         max_dc_count = 0
         max_ec_count = 0
 
-        dcdata = [0] * len(rs_blocks)
-        ecdata = [0] * len(rs_blocks)
+        dcdata = [None] * len(rs_blocks)
+        ecdata = [None] * len(rs_blocks)
 
         for r, block in enumerate(rs_blocks):
             dc_count = block["data"]
@@ -302,57 +291,44 @@ class QRCode:
             max_dc_count = max(max_dc_count, dc_count)
             max_ec_count = max(max_ec_count, ec_count)
 
-            dcdata[r] = [0] * dc_count
-
-            for i in range(len(dcdata[r])):
-                dcdata[r][i] = 0xFF & buffer.buffer[i + offset]
+            dcdata[r] = buffer.buffer[offset : offset + dc_count]
             offset += dc_count
 
             rs_poly = QRUtil.get_error_correct_polynomial(ec_count)
-            mod_poly = QRPolynomial(dcdata[r], rs_poly.get_length() - 1)
+            mod_poly = QRPolynomial(dcdata[r], len(rs_poly) - 1)
 
             while True:
-                if mod_poly.get_length() - rs_poly.get_length() < 0:
+                if len(mod_poly) - len(rs_poly) < 0:
                     break
-                ratio = _glog(mod_poly.get(0)) - _glog(rs_poly.get(0))
-                num = [0 for x in range(mod_poly.get_length())]
-                for i in range(mod_poly.get_length()):
-                    num[i] = mod_poly.get(i)
-                for i in range(rs_poly.get_length()):
-                    num[i] ^= _gexp(_glog(rs_poly.get(i)) + ratio)
+                ratio = _glog(mod_poly[0]) - _glog(rs_poly[0])
+                num = mod_poly.num
+                for i, x in enumerate(rs_poly):
+                    num[i] ^= _gexp(_glog(x) + ratio)
                 mod_poly = QRPolynomial(num, 0)
 
-            ecdata[r] = [0 for x in range(rs_poly.get_length() - 1)]
+            ecdata[r] = bytearray(len(rs_poly) - 1)
             for i in range(len(ecdata[r])):
-                mod_index = i + mod_poly.get_length() - len(ecdata[r])
+                mod_index = i + len(mod_poly) - len(ecdata[r])
                 if mod_index >= 0:
-                    ecdata[r][i] = mod_poly.get(mod_index)
-                else:
-                    ecdata[r][i] = 0
+                    ecdata[r][i] = mod_poly[mod_index]
 
         total_code_count = 0
         for block in rs_blocks:
             total_code_count += block["total"]
 
-        data = [None] * total_code_count
-        index = 0
+        data = bytearray()
 
         for i in range(max_dc_count):
             for r in range(len(rs_blocks)):
                 if i < len(dcdata[r]):
-                    data[index] = dcdata[r][i]
-                    index += 1
+                    data.append(dcdata[r][i])
 
         for i in range(max_ec_count):
             for r in range(len(rs_blocks)):
                 if i < len(ecdata[r]):
-                    data[index] = ecdata[r][i]
-                    index += 1
+                    data.append(ecdata[r][i])
 
         return data
-
-
-# pylint: enable=too-many-locals,too-many-branches
 
 
 class QRUtil:
@@ -400,11 +376,7 @@ class QRUtil:
     @staticmethod
     def get_BCH_digit(data):
         """Count digits in data"""
-        digit = 0
-        while data != 0:
-            digit += 1
-            data >>= 1
-        return digit
+        return len(bin(data)) - 2
 
     # pylint: enable=invalid-name
     @staticmethod
@@ -412,35 +384,28 @@ class QRUtil:
         """The mask pattern position array for this QR type"""
         return QRUtil.PATTERN_POSITION_TABLE[qr_type - 1]
 
+    mask_patterns = [
+        lambda i, j: (i + j) % 2 == 0,
+        lambda i, j: i % 2 == 0,
+        lambda i, j: j % 3 == 0,
+        lambda i, j: (i + j) % 3 == 0,
+        lambda i, j: ((i // 2) + (j // 3)) % 2 == 0,
+        lambda i, j: (i * j) % 2 + (i * j) % 3 == 0,
+        lambda i, j: ((i * j) % 2 + (i * j) % 3) % 2 == 0,
+        lambda i, j: ((i * j) % 3 + (i + j) % 2) % 2 == 0,
+    ]
+
     @staticmethod
     def get_mask(mask, i, j):
         """Perform matching calculation on two vals for given pattern mask"""
-        # pylint: disable=multiple-statements, too-many-return-statements
-        if mask == 0:
-            return (i + j) % 2 == 0
-        if mask == 1:
-            return i % 2 == 0
-        if mask == 2:
-            return j % 3 == 0
-        if mask == 3:
-            return (i + j) % 3 == 0
-        if mask == 4:
-            return (math.floor(i / 2) + math.floor(j / 3)) % 2 == 0
-        if mask == 5:
-            return (i * j) % 2 + (i * j) % 3 == 0
-        if mask == 6:
-            return ((i * j) % 2 + (i * j) % 3) % 2 == 0
-        if mask == 7:
-            return ((i * j) % 3 + (i + j) % 2) % 2 == 0
-        raise ValueError("Bad mask pattern:" + mask)
-        # pylint: enable=multiple-statements, too-many-return-statements
+        return QRUtil.mask_patterns[mask](i, j)
 
     @staticmethod
     def get_error_correct_polynomial(ecc_length):
         """Generate a ecc polynomial"""
-        poly = QRPolynomial([1], 0)
+        poly = QRPolynomial(bytes([1]), 0)
         for i in range(ecc_length):
-            poly = poly.multiply(QRPolynomial([1, _gexp(i)], 0))
+            poly *= QRPolynomial(bytes([1, _gexp(i)]), 0)
         return poly
 
 
@@ -454,25 +419,25 @@ class QRPolynomial:
         offset = 0
         while offset < len(num) and num[offset] == 0:
             offset += 1
-        self.num = [0 for x in range(len(num) - offset + shift)]
-        for i in range(len(num) - offset):
-            self.num[i] = num[i + offset]
+        actual = len(num) - offset
+        self.num = bytearray(actual + shift)
+        self.num[:actual] = num[offset:]
 
-    def get(self, index):
+    def __getitem__(self, index):
         """The exponent at the index location"""
         return self.num[index]
 
-    def get_length(self):
+    def __len__(self):
         """Length of the poly"""
         return len(self.num)
 
-    def multiply(self, e):  # pylint: disable=invalid-name
+    def __mul__(self, e):  # pylint: disable=invalid-name
         """Multiply two polynomials, returns a new one"""
-        num = [0 for x in range(self.get_length() + e.get_length() - 1)]
+        num = bytearray(len(self) + len(e) - 1)
 
-        for i in range(self.get_length()):
-            for j in range(e.get_length()):
-                num[i + j] ^= _gexp(_glog(self.get(i)) + _glog(e.get(j)))
+        for i, _a in enumerate(self):
+            for j, _b in enumerate(e):
+                num[i + j] ^= _gexp(_glog(_a) + _glog(_b))
 
         return QRPolynomial(num, 0)
 
